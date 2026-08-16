@@ -22,4 +22,20 @@ pub struct Cli {
     /// Restrict to a file type, e.g. -t rust. Repeatable
     #[arg(short = 't', long = "type")]
     pub types: Vec<String>,
+
+    /// Start in filename fuzzy mode instead of content mode
+    #[arg(short = 'f', long = "files")]
+    pub files: bool,
+
+    /// Resume the last session: query, mode and cursor position
+    #[arg(short = 'r', long)]
+    pub resume: bool,
+
+    /// Include hidden files and directories
+    #[arg(long)]
+    pub hidden: bool,
+
+    /// Don't respect .gitignore, .ignore, or global git excludes
+    #[arg(long)]
+    pub no_ignore: bool,
 }

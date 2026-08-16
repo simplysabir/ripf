@@ -1,20 +1,38 @@
 use crate::cli::Cli;
+use crate::keys::{Chord, Keymap};
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::{
-    format,
-    path::{PathBuf},
-};
+use std::{format, path::PathBuf};
 
 /// Mirrors config.toml exactly. Every field optional so a partial file works.
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub open_command: Option<String>,
+    pub keys: KeysConfig,
 
     /// Option, not bool: `#[derive(Default)]` would make a bare bool `false`,
     /// which is the wrong default. Resolved to `true` in `Settings::resolve`.
     pub quit_on_open: Option<bool>,
+}
+
+/// The `[keys]` table. Absent entries keep their default binding.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct KeysConfig {
+    pub toggle_mode: Option<String>,
+    pub toggle_preview: Option<String>,
+    pub refresh: Option<String>,
+    pub mark: Option<String>,
+}
+
+/// Overrides one binding, reporting which setting was wrong rather than just
+/// which string failed to parse.
+fn bind(slot: &mut Chord, spec: Option<String>, name: &str) -> Result<()> {
+    if let Some(spec) = spec {
+        *slot = crate::keys::parse(&spec).map_err(|e| anyhow::anyhow!("keys.{name}: {e}"))?;
+    }
+    Ok(())
 }
 
 /// XDG-style, deliberately NOT dirs::config_dir(): on macOS that returns
@@ -76,6 +94,10 @@ pub struct Settings {
     pub print: bool,
     pub types: Vec<String>,
     pub quit_on_open: bool,
+    pub files: bool,
+    pub resume: bool,
+    pub walk: crate::search::WalkOpts,
+    pub keys: Keymap,
 }
 
 impl Settings {
@@ -95,12 +117,33 @@ impl Settings {
             );
         }
 
+        let mut keys = Keymap::default();
+        bind(
+            &mut keys.toggle_mode,
+            config.keys.toggle_mode,
+            "toggle_mode",
+        )?;
+        bind(
+            &mut keys.toggle_preview,
+            config.keys.toggle_preview,
+            "toggle_preview",
+        )?;
+        bind(&mut keys.refresh, config.keys.refresh, "refresh")?;
+        bind(&mut keys.mark, config.keys.mark, "mark")?;
+
         Ok(Settings {
             open_command,
             query: cli.query,
             print: cli.print,
             types: cli.types,
             quit_on_open: config.quit_on_open.unwrap_or(true),
+            files: cli.files,
+            resume: cli.resume,
+            walk: crate::search::WalkOpts {
+                hidden: cli.hidden,
+                no_ignore: cli.no_ignore,
+            },
+            keys,
         })
     }
 }

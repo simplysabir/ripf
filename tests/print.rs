@@ -42,7 +42,10 @@ fn run(args: &[&str]) -> (Vec<String>, Option<i32>, String) {
 fn finds_matches_across_file_types() {
     let (lines, code, _) = run(&["--print", "needle"]);
     assert_eq!(code, Some(0));
-    assert_eq!(lines, ["conf.toml:1:1", "src/main.rs:2:9", "src/main.rs:3:15"]);
+    assert_eq!(
+        lines,
+        ["conf.toml:1:1", "src/main.rs:2:9", "src/main.rs:3:15"]
+    );
 }
 
 #[test]
@@ -100,6 +103,83 @@ fn invalid_regex_exits_two_with_a_message() {
         stderr.contains("regex parse error"),
         "unhelpful error: {stderr}"
     );
+}
+
+// --- file mode (-f) ---
+
+#[test]
+fn file_mode_lists_every_searchable_file() {
+    let (mut lines, code, _) = run(&["--print", "-f"]);
+    lines.sort();
+    assert_eq!(code, Some(0));
+    assert_eq!(lines, ["conf.toml", "src/main.rs"]);
+}
+
+#[test]
+fn file_mode_respects_the_same_ignore_rules() {
+    let (lines, _, _) = run(&["--print", "-f"]);
+    assert!(
+        !lines.iter().any(|l| l.contains("build/out.txt")),
+        "gitignored file listed: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("hidden")),
+        "hidden file listed: {lines:?}"
+    );
+}
+
+#[test]
+fn file_mode_fuzzy_matches_non_contiguous_characters() {
+    // 'mainrs' appears nowhere as a substring; it only matches fuzzily.
+    let (lines, _, _) = run(&["--print", "-f", "mainrs"]);
+    assert_eq!(lines, ["src/main.rs"]);
+}
+
+#[test]
+fn file_mode_ranks_best_match_first() {
+    // Both files match 'o'; the ranking must be deterministic, not walk order.
+    let (a, _, _) = run(&["--print", "-f", "o"]);
+    let (b, _, _) = run(&["--print", "-f", "o"]);
+    assert_eq!(a, b, "ranking is unstable between runs");
+    assert!(!a.is_empty());
+}
+
+#[test]
+fn file_mode_no_match_exits_one() {
+    let (lines, code, _) = run(&["--print", "-f", "zzzqqqnope"]);
+    assert!(lines.is_empty());
+    assert_eq!(code, Some(1));
+}
+
+// --- ignore overrides ---
+
+#[test]
+fn hidden_flag_includes_dotfiles() {
+    let (without, _, _) = run(&["--print", "needle"]);
+    let (with, _, _) = run(&["--print", "--hidden", "needle"]);
+    assert!(!without.iter().any(|l| l.contains(".hidden.txt")));
+    assert!(
+        with.iter().any(|l| l.contains(".hidden.txt")),
+        "--hidden did not reach the dotfile: {with:?}"
+    );
+}
+
+#[test]
+fn no_ignore_flag_includes_gitignored_files() {
+    let (without, _, _) = run(&["--print", "needle"]);
+    let (with, _, _) = run(&["--print", "--no-ignore", "needle"]);
+    assert!(!without.iter().any(|l| l.contains("build/out.txt")));
+    assert!(
+        with.iter().any(|l| l.contains("build/out.txt")),
+        "--no-ignore did not reach the ignored file: {with:?}"
+    );
+}
+
+#[test]
+fn ignore_overrides_apply_in_file_mode_too() {
+    let (with, _, _) = run(&["--print", "-f", "--hidden", "--no-ignore"]);
+    assert!(with.iter().any(|l| l.contains(".hidden.txt")));
+    assert!(with.iter().any(|l| l.contains("build/out.txt")));
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use crate::search::{Hit, SearchMsg};
+use crate::search::{Hit, SearchMsg, WalkOpts};
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkMatch};
@@ -9,8 +9,6 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-/// Cap so a query like `e` can't eat memory or stall rendering.
-pub const MAX_HITS: usize = 5_000;
 /// Hits per channel message. One send per hit would swamp the UI thread.
 const BATCH: usize = 50;
 
@@ -21,6 +19,7 @@ struct HitSink<'a> {
     generation: u64,
     current_gen: &'a AtomicU64,
     total: &'a AtomicUsize,
+    limit: usize,
     tx: &'a Sender<SearchMsg>,
     batch: Vec<Hit>,
 }
@@ -42,7 +41,7 @@ impl Sink for HitSink<'_> {
         if self.current_gen.load(Ordering::Relaxed) != self.generation {
             return Ok(false);
         }
-        if self.total.fetch_add(1, Ordering::Relaxed) >= MAX_HITS {
+        if self.total.fetch_add(1, Ordering::Relaxed) >= self.limit {
             return Ok(false);
         }
 
@@ -100,9 +99,14 @@ fn first_line(s: &str) -> String {
 
 /// Runs to completion on the calling thread, streaming batches over `tx`.
 /// Call it from a worker thread, never from the UI thread.
+/// `limit` caps results: the TUI passes `MAX_HITS` to bound memory and
+/// rendering; `--print` passes `usize::MAX` because a silently truncated
+/// count is a bug in a scripting interface.
 pub fn search(
     query: &str,
     types: &[String],
+    walk: WalkOpts,
+    limit: usize,
     generation: u64,
     current_gen: Arc<AtomicU64>,
     tx: Sender<SearchMsg>,
@@ -126,8 +130,11 @@ pub fn search(
 
     let total = Arc::new(AtomicUsize::new(0));
 
-    WalkBuilder::new(".")
-        .types(types)
+    let mut builder = WalkBuilder::new(".");
+    builder.types(types);
+    walk.apply(&mut builder);
+
+    builder
         .build_parallel()
         // Called once per walker thread; whatever it returns visits entries.
         .run(|| {
@@ -142,7 +149,7 @@ pub fn search(
 
             Box::new(move |entry| {
                 if current_gen.load(Ordering::Relaxed) != generation
-                    || total.load(Ordering::Relaxed) >= MAX_HITS
+                    || total.load(Ordering::Relaxed) >= limit
                 {
                     // Quit stops every walker thread, not just this one.
                     return WalkState::Quit;
@@ -165,6 +172,7 @@ pub fn search(
                     generation,
                     current_gen: &current_gen,
                     total: &total,
+                    limit,
                     tx: &tx,
                     batch: Vec::new(),
                 };

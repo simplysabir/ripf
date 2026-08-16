@@ -1,6 +1,24 @@
-use crate::search::Hit;
-use crate::search::engine::MAX_HITS;
+use crate::preview::{self, Preview};
+use crate::search::{Hit, MAX_HITS};
 use std::collections::BTreeSet;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    /// Query is a regex, matched against file contents.
+    Grep,
+    /// Query fuzzy-matches file paths.
+    Files,
+}
+
+impl Mode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Grep => " GREP ",
+            Mode::Files => " FILES ",
+        }
+    }
+}
 
 pub struct App {
     pub query: String,
@@ -9,6 +27,7 @@ pub struct App {
     pub hits: Vec<Hit>,
     pub selected: usize,
     pub marked: BTreeSet<usize>,
+    pub mode: Mode,
     /// Bumped on every query edit; results tagged with an older value are stale.
     pub generation: u64,
     /// Generation currently on screen. Results are cleared when the first
@@ -17,20 +36,30 @@ pub struct App {
     displayed_generation: u64,
     pub status: String,
     pub should_quit: bool,
+    /// Set by `-r`. Applied once the resumed search completes, since the hits
+    /// it indexes into don't exist yet at startup.
+    pub restore_selected: Option<usize>,
+    pub show_preview: bool,
+    /// Cached so we don't re-read the file on every 30ms redraw.
+    preview: Option<Preview>,
 }
 
 impl App {
-    pub fn new(query: String) -> Self {
+    pub fn new(query: String, mode: Mode) -> Self {
         Self {
             cursor: query.len(),
             query,
             hits: Vec::new(),
             selected: 0,
             marked: BTreeSet::new(),
+            mode,
             generation: 0,
             displayed_generation: 0,
             status: String::new(),
             should_quit: false,
+            restore_selected: None,
+            show_preview: false,
+            preview: None,
         }
     }
 
@@ -74,6 +103,37 @@ impl App {
         self.selected = self.selected.saturating_add_signed(delta).min(last);
     }
 
+    pub fn preview(&self) -> Option<&Preview> {
+        self.preview.as_ref()
+    }
+
+    /// Reload the preview only when the selected hit actually changed. Called
+    /// once per loop iteration; the common case is a cheap comparison.
+    pub fn refresh_preview(&mut self) {
+        if !self.show_preview {
+            self.preview = None;
+            return;
+        }
+        let Some(hit) = self.hits.get(self.selected) else {
+            self.preview = None;
+            return;
+        };
+        let stale = match &self.preview {
+            Some(p) => p.path != hit.path || p.line != hit.line_number,
+            None => true,
+        };
+        if stale {
+            self.preview = preview::load(&hit.path, hit.line_number);
+        }
+    }
+
+    pub fn toggle_mode(&mut self) {
+        self.mode = match self.mode {
+            Mode::Grep => Mode::Files,
+            Mode::Files => Mode::Grep,
+        };
+    }
+
     pub fn toggle_mark(&mut self) {
         if self.hits.is_empty() {
             return;
@@ -111,6 +171,9 @@ impl App {
             return;
         }
         self.adopt(generation);
+        if let Some(want) = self.restore_selected.take() {
+            self.selected = want.min(self.hits.len().saturating_sub(1));
+        }
         // `+` because the search stops at MAX_HITS — there may be more.
         let more = if self.hits.len() >= MAX_HITS { "+" } else { "" };
         self.status = format!("{}{more} matches in {elapsed_ms}ms", self.hits.len());

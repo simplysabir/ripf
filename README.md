@@ -17,7 +17,7 @@ Beyond that:
 - **Exact position opening.** Results carry `file:line:col`, and your editor lands on the match — not the top of the file.
 - **Two modes, one binary.** `ctrl-f` flips between content search and fuzzy filename search. No second tool, no second pipeline.
 - **Multi-select.** Mark several results, open them all at once.
-- **Preview.** See the surrounding code before you commit to opening it.
+- **Preview.** `ctrl-p` opens a pane showing the code around the match before you commit to opening it.
 - **Resume.** `ripf -r` picks up your last query, mode, and cursor position.
 - **One config file.** One `open_command` string is the entire editor integration.
 
@@ -61,7 +61,7 @@ ripf --print "unwrap()" -t rust || echo "clean"
 | `-t`, `--type <TYPE>` | Restrict to a file type (`rust`, `toml`, `py`, …). Repeatable. |
 | `-f`, `--files` | Start in filename fuzzy mode instead of content mode. |
 | `-r`, `--resume` | Restore the last session's query, mode, and cursor. |
-| `--print` | Print `file:line:col` to stdout and exit. No TUI. |
+| `--print` | Print results to stdout and exit. No TUI. `file:line:col` in GREP mode, bare paths in FILES mode. |
 | `--open <CMD>` | Override `open_command` for this run. |
 | `--hidden` | Include hidden files. |
 | `--no-ignore` | Ignore `.gitignore` and friends. |
@@ -78,6 +78,8 @@ ripf --print "unwrap()" -t rust || echo "clean"
 | `ctrl-r` | Rebuild the file cache (FILES mode) |
 | `esc`, `ctrl-c` | Quit |
 
+`ctrl-f`, `ctrl-p`, `ctrl-r` and `tab` are rebindable — see [Configuration](#configuration).
+
 ## Configuration
 
 `~/.config/ripf/config.toml` (or `$XDG_CONFIG_HOME/ripf/config.toml`):
@@ -89,11 +91,17 @@ open_command = "cursor -g {file}:{line}:{col}"
 # Exit after opening a result. Default: true.
 quit_on_open = true
 
-# Optional key overrides.
+# Optional key overrides. Absent entries keep their default.
 [keys]
 toggle_mode = "ctrl-f"
 toggle_preview = "ctrl-p"
+refresh = "ctrl-r"
+mark = "tab"
 ```
+
+Bindings are written as `modifier-modifier-key`, e.g. `ctrl-f`, `alt-shift-p`,
+`tab`, `space`. Movement, `enter` and `esc` are not rebindable — they have two
+bindings each or are load-bearing enough that unbinding them is a footgun.
 
 If `open_command` is unset, `ripf` falls back to `$EDITOR`. Precedence is `--open` → config file → `$EDITOR` → error.
 
@@ -117,23 +125,11 @@ The command is split with POSIX shell-word rules and executed directly — **no 
 
 **GREP** — your query is a regex, evaluated by ripgrep's engine across the repo. Smart-case: lowercase queries match case-insensitively, any uppercase character makes the search case-sensitive.
 
-**FILES** — your query fuzzy-matches against file paths, ranked by score, the way `fzf` does.
+**FILES** — your query fuzzy-matches against file paths, ranked by score, the way `fzf` does. An empty query lists every file.
+
+The preview pane (`ctrl-p`) shows plain, unhighlighted text — `ripf` has no external binary dependency and doesn't ship megabytes of syntax definitions to colour a side pane.
 
 `.gitignore`, `.ignore` and global git excludes are respected in both modes. `--no-ignore` opts out.
-
-## Status
-
-`ripf` is built in phases. This README describes the finished tool; here's what's actually released:
-
-| | Feature | Status |
-|---|---|---|
-| 0.1.0 | `--print`, result list, open at `file:line:col`, `-t` filters | ✅ shipped |
-| 0.1.1 | Live TUI, incremental search, multi-select | ✅ shipped |
-| 0.2.0 | Native ripgrep engine (no `rg` subprocess), smart-case | ✅ shipped |
-| 0.3.0 | Filename fuzzy mode (`-f`, `ctrl-f`) | ⬜ planned |
-| 0.4.0 | Preview pane, resume, key remapping | ⬜ planned |
-
-Versions before 0.2.0 shelled out to the `rg` binary and required [ripgrep](https://github.com/BurntSushi/ripgrep) on your `PATH`. From 0.2.0 the engine is [ripgrep's own library crates](https://github.com/BurntSushi/ripgrep/tree/master/crates) compiled in, so there is no external dependency.
 
 ## Non-goals
 
