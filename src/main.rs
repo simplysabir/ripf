@@ -1,4 +1,10 @@
 mod open;
+mod cli;
+
+use std::dbg;
+
+use clap::Parser;
 fn main() {
-    println!("Hello, world!");
+    let cli = cli::Cli::parse();
+    dbg!(&cli); // TEMPORARY - will be replaced later
 }
