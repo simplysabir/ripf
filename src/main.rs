@@ -10,7 +10,6 @@ use clap::Parser;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-
 fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
@@ -47,7 +46,13 @@ fn run() -> Result<ExitCode> {
     }
 
     for (i, h) in hits.iter().enumerate() {
-        println!("[{}] {}:{}: {}", i + 1, h.path, h.line_number, h.line_text.trim());
+        println!(
+            "[{}] {}:{}: {}",
+            i + 1,
+            h.path,
+            h.line_number,
+            h.line_text.trim()
+        );
     }
 
     let Some(idx) = prompt_choice(hits.len())? else {
