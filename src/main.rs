@@ -1,7 +1,9 @@
+mod app;
 mod cli;
 mod config;
 mod open;
 mod rg;
+mod tui;
 
 use crate::cli::Cli;
 use crate::config::Settings;
