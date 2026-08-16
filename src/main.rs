@@ -1,5 +1,6 @@
-mod open;
 mod cli;
+mod config;
+mod open;
 
 use std::dbg;
 
