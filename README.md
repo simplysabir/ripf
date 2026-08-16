@@ -27,7 +27,7 @@ Beyond that:
 cargo install ripf
 ```
 
-ripgrep's search engine is compiled in, so there's nothing else to install. (Through 0.2, `ripf` shells out to the `rg` binary instead and needs it on your `PATH` — see [Status](#status).)
+ripgrep's search engine is compiled in, so there's nothing else to install. (Through 0.1.x, `ripf` shells out to the `rg` binary instead and needs it on your `PATH` — see [Status](#status).)
 
 Then point it at your editor:
 
@@ -127,13 +127,13 @@ The command is split with POSIX shell-word rules and executed directly — **no 
 
 | | Feature | Status |
 |---|---|---|
-| 0.1 | `--print`, result list, open at `file:line:col`, `-t` filters | ✅ shipped |
-| 0.2 | Live TUI, incremental search, multi-select | 🚧 in progress |
-| 0.3 | Native ripgrep engine (no `rg` subprocess) | ⬜ planned |
-| 0.4 | Filename fuzzy mode (`-f`, `ctrl-f`) | ⬜ planned |
-| 0.5 | Preview pane, resume, key remapping | ⬜ planned |
+| 0.1.0 | `--print`, result list, open at `file:line:col`, `-t` filters | ✅ shipped |
+| 0.1.1 | Live TUI, incremental search, multi-select | ✅ shipped |
+| 0.2.0 | Native ripgrep engine (no `rg` subprocess) | ⬜ planned |
+| 0.3.0 | Filename fuzzy mode (`-f`, `ctrl-f`) | ⬜ planned |
+| 0.4.0 | Preview pane, resume, key remapping | ⬜ planned |
 
-**Before 0.3, `ripf` shells out to the `rg` binary and requires [ripgrep](https://github.com/BurntSushi/ripgrep) on your `PATH`** (`brew install ripgrep`). From 0.3 onward the engine is compiled in and there is no external dependency.
+**Before 0.2.0, `ripf` shells out to the `rg` binary and requires [ripgrep](https://github.com/BurntSushi/ripgrep) on your `PATH`** (`brew install ripgrep`). From 0.2.0 onward the engine is compiled in and there is no external dependency.
 
 ## Non-goals
 

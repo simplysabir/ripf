@@ -82,11 +82,25 @@ impl App {
         if generation != self.generation {
             return;
         }
-        self.status = format!("{} matches in {}ms", hits.len(), elapsed_ms);
+        // `+` because the search stops at MAX_HITS — there may be more.
+        let more = if hits.len() >= crate::rg::MAX_HITS { "+" } else { "" };
+        self.status = format!("{}{more} matches in {elapsed_ms}ms", hits.len());
         self.hits = hits;
         // Marks index into `hits`; a new result set makes them meaningless.
         self.marked.clear();
         self.selected = 0;
+    }
+
+    /// A failed search (bad regex, rg missing) — surface it in the status bar
+    /// rather than silently showing zero results.
+    pub fn set_error(&mut self, generation: u64, message: String) {
+        if generation != self.generation {
+            return;
+        }
+        self.hits.clear();
+        self.marked.clear();
+        self.selected = 0;
+        self.status = message;
     }
 
     /// What `enter` acts on: every marked hit, or the selected one.

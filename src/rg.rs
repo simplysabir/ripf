@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde::de::IgnoredAny;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// One matching *line* — not one match. A line with three matches yields one
 /// Hit, with `col` taken from the first, same as `rg --column`.
@@ -68,7 +69,15 @@ fn parse_line(line: &str) -> Option<Hit> {
     }
 }
 
-pub fn search(query: &str, types: &[String]) -> Result<Vec<Hit>> {
+/// Cap so a query like `e` can't eat memory or stall rendering.
+pub const MAX_HITS: usize = 5_000;
+
+pub fn search(
+    query: &str,
+    types: &[String],
+    my_gen: u64,
+    current_gen: &AtomicU64,
+) -> Result<Vec<Hit>> {
     let mut cmd = Command::new("rg");
     cmd.arg("--json").arg("--color=never");
     for t in types {
@@ -83,11 +92,29 @@ pub fn search(query: &str, types: &[String]) -> Result<Vec<Hit>> {
         .context("failed to run `rg` — is ripgrep installed? (brew install ripgrep)")?;
 
     let stdout = child.stdout.take().expect("stdout was piped above");
-    let hits: Vec<Hit> = BufReader::new(stdout)
-        .lines()
-        .map_while(Result::ok)
-        .filter_map(|line| parse_line(&line))
-        .collect();
+    let mut hits: Vec<Hit> = Vec::new();
+
+    for (i, line) in BufReader::new(stdout).lines().enumerate() {
+        let Ok(line) = line else { break };
+
+        // Cooperative cancellation: the UI thread bumps `current_gen` on every
+        // keystroke, and we notice on our next read. Checked every 64 lines so
+        // an atomic load isn't in the hot path.
+        if i % 64 == 0 && current_gen.load(Ordering::Relaxed) != my_gen {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(Vec::new());
+        }
+
+        if let Some(hit) = parse_line(&line) {
+            hits.push(hit);
+            if hits.len() >= MAX_HITS {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(hits);
+            }
+        }
+    }
 
     // Reap the child so it isn't left a zombie.
     let status = child.wait().context("failed to wait on rg")?;

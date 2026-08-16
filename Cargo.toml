@@ -1,6 +1,6 @@
 [package]
 name = "ripf"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Interactive code search for the terminal: search, pick a result, open it in your editor at the exact line"
