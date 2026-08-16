@@ -1,4 +1,5 @@
-use crate::rg::Hit;
+use crate::search::Hit;
+use crate::search::engine::MAX_HITS;
 use std::collections::BTreeSet;
 
 pub struct App {
@@ -10,6 +11,10 @@ pub struct App {
     pub marked: BTreeSet<usize>,
     /// Bumped on every query edit; results tagged with an older value are stale.
     pub generation: u64,
+    /// Generation currently on screen. Results are cleared when the first
+    /// batch of a *new* generation lands, not on keystroke — otherwise the
+    /// list blinks empty every time you type.
+    displayed_generation: u64,
     pub status: String,
     pub should_quit: bool,
 }
@@ -23,6 +28,7 @@ impl App {
             selected: 0,
             marked: BTreeSet::new(),
             generation: 0,
+            displayed_generation: 0,
             status: String::new(),
             should_quit: false,
         }
@@ -78,25 +84,45 @@ impl App {
     }
 
     /// Accept results only if they belong to the current generation.
-    pub fn set_hits(&mut self, generation: u64, hits: Vec<Hit>, elapsed_ms: u128) {
+    /// Drop everything on screen if these results belong to a newer search.
+    fn adopt(&mut self, generation: u64) {
+        if self.displayed_generation != generation {
+            self.hits.clear();
+            // Marks index into `hits`; a new result set makes them meaningless.
+            self.marked.clear();
+            self.selected = 0;
+            self.displayed_generation = generation;
+        }
+    }
+
+    /// A streamed batch. Many of these arrive per search.
+    pub fn append_hits(&mut self, generation: u64, hits: Vec<Hit>) {
         if generation != self.generation {
             return;
         }
-        // `+` because the search stops at MAX_HITS — there may be more.
-        let more = if hits.len() >= crate::rg::MAX_HITS { "+" } else { "" };
-        self.status = format!("{}{more} matches in {elapsed_ms}ms", hits.len());
-        self.hits = hits;
-        // Marks index into `hits`; a new result set makes them meaningless.
-        self.marked.clear();
-        self.selected = 0;
+        self.adopt(generation);
+        self.hits.extend(hits);
     }
 
-    /// A failed search (bad regex, rg missing) — surface it in the status bar
-    /// rather than silently showing zero results.
+    /// The walk finished. Also handles the zero-result case, where no batch
+    /// ever arrived to trigger `adopt`.
+    pub fn finish(&mut self, generation: u64, elapsed_ms: u128) {
+        if generation != self.generation {
+            return;
+        }
+        self.adopt(generation);
+        // `+` because the search stops at MAX_HITS — there may be more.
+        let more = if self.hits.len() >= MAX_HITS { "+" } else { "" };
+        self.status = format!("{}{more} matches in {elapsed_ms}ms", self.hits.len());
+    }
+
+    /// A failed search (bad regex, bad type filter) — surface it in the status
+    /// bar rather than silently showing zero results.
     pub fn set_error(&mut self, generation: u64, message: String) {
         if generation != self.generation {
             return;
         }
+        self.adopt(generation);
         self.hits.clear();
         self.marked.clear();
         self.selected = 0;

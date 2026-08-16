@@ -2,14 +2,15 @@ mod app;
 mod cli;
 mod config;
 mod open;
-mod rg;
+mod search;
 mod tui;
 mod ui;
 
 use crate::app::App;
 use crate::cli::Cli;
 use crate::config::Settings;
-use crate::rg::Hit;
+use crate::search::SearchMsg;
+use crate::search::engine;
 use crate::tui::TerminalGuard;
 use anyhow::Result;
 use clap::Parser;
@@ -24,8 +25,6 @@ use std::time::{Duration, Instant};
 const DEBOUNCE: Duration = Duration::from_millis(80);
 /// How long to wait for a key before looping to redraw and drain results.
 const POLL: Duration = Duration::from_millis(30);
-
-type SearchResult = (u64, Result<Vec<Hit>, String>, u128);
 
 fn main() -> ExitCode {
     match run() {
@@ -54,14 +53,28 @@ fn run_print(settings: &Settings) -> Result<ExitCode> {
         anyhow::bail!("--print needs a query");
     };
 
-    // No cancellation here: one search, run to completion. Passing a counter
-    // that equals `my_gen` means the staleness check never fires.
-    let never = AtomicU64::new(0);
-    let hits = rg::search(query, &settings.types, 0, &never)?;
+    let (tx, rx) = mpsc::channel::<SearchMsg>();
+    // Generation 0 throughout, so the staleness check never fires.
+    engine::search(query, &settings.types, 0, Arc::new(AtomicU64::new(0)), tx);
+
+    let mut hits = Vec::new();
+    // The iterator ends when every sender has dropped, which `search` guarantees
+    // by returning.
+    for msg in rx {
+        match msg {
+            SearchMsg::Hits(_, batch) => hits.extend(batch),
+            SearchMsg::Done(_, _) => {}
+            SearchMsg::Error(_, e) => anyhow::bail!("{e}"),
+        }
+    }
 
     if hits.is_empty() {
         return Ok(ExitCode::from(1));
     }
+
+    // The walk is parallel, so arrival order is nondeterministic. Sort so
+    // piping into diff/wc/tests gives stable output.
+    hits.sort_by(|a, b| a.path.cmp(&b.path).then(a.line_number.cmp(&b.line_number)));
     for h in &hits {
         println!("{}:{}:{}", h.path, h.line_number, h.col);
     }
@@ -76,7 +89,7 @@ fn run_tui(settings: &Settings) -> Result<()> {
 
     let mut app = App::new(settings.query.clone().unwrap_or_default());
     let current_gen = Arc::new(AtomicU64::new(0));
-    let (tx, rx) = mpsc::channel::<SearchResult>();
+    let (tx, rx) = mpsc::channel::<SearchMsg>();
 
     let mut guard = TerminalGuard::new()?;
 
@@ -89,14 +102,16 @@ fn run_tui(settings: &Settings) -> Result<()> {
 
         if pending && last_edit.elapsed() >= DEBOUNCE {
             pending = false;
+            app.status = "searching…".to_string();
             spawn_search(&app, settings, &current_gen, &tx);
         }
 
         // Non-blocking drain: never wait on the worker from the UI thread.
-        while let Ok((generation, res, ms)) = rx.try_recv() {
-            match res {
-                Ok(hits) => app.set_hits(generation, hits, ms),
-                Err(e) => app.set_error(generation, e),
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                SearchMsg::Hits(g, batch) => app.append_hits(g, batch),
+                SearchMsg::Done(g, ms) => app.finish(g, ms),
+                SearchMsg::Error(g, e) => app.set_error(g, e),
             }
         }
 
@@ -159,13 +174,13 @@ fn spawn_search(
     app: &App,
     settings: &Settings,
     current_gen: &Arc<AtomicU64>,
-    tx: &Sender<SearchResult>,
+    tx: &Sender<SearchMsg>,
 ) {
     let generation = app.generation;
 
     // An empty query means empty results, not "search for nothing".
     if app.query.is_empty() {
-        let _ = tx.send((generation, Ok(Vec::new()), 0));
+        let _ = tx.send(SearchMsg::Done(generation, 0));
         return;
     }
 
@@ -175,10 +190,7 @@ fn spawn_search(
     let tx = tx.clone();
 
     std::thread::spawn(move || {
-        let started = Instant::now();
-        let res = rg::search(&query, &types, generation, &current_gen).map_err(|e| format!("{e:#}"));
-        // Send failing just means the UI quit; nothing to do about it.
-        let _ = tx.send((generation, res, started.elapsed().as_millis()));
+        engine::search(&query, &types, generation, current_gen, tx);
     });
 }
 
